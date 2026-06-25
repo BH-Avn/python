@@ -1,0 +1,16 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Runtime / app-generated data
+scraper/cache.json
+scraper/novel_cache.json
+scraper/output/
+scraper/downloaded_epubs/
+scraper/_backups/
+
+# Anki input file — user-managed, cleared after each run
+anki-generation/cards.txt
+
+# IDE
+.claude/
