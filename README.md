@@ -2,6 +2,8 @@
 
 A collection of Python tools built for personal use.
 
+> **Note:** The code in this repo was written by Claude Opus. I cannot guarantee efficiency, but I can guarantee it works.
+
 ---
 
 ## Projects
