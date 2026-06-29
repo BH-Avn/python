@@ -20,12 +20,21 @@ Requires:
 """
 import contextlib
 import os
+import random
 import time
 
 # Title substrings shown while Cloudflare is still challenging / the SPA is
 # still booting. Any of these (or a title that raises mid-navigation) means
 # "not ready yet".
 CF_TITLES = ("just a moment", "checking your browser", "loading", "verifying")
+
+# Cloudflare error 1015 — "You are being rate limited" (served as HTTP 429).
+# A shared cf_clearance cookie gets you past the challenge but NOT past the
+# site's rate-based throttling: too many requests per minute from one IP and
+# Cloudflare returns 1015 instead of content. Detected by HTTP 429 (authorita-
+# tive) or these body markers, and handled with exponential backoff + retry.
+# https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1015/
+RATE_LIMIT_MARKERS = ("error 1015", "you are being rate limited", "rate limited")
 
 
 _INSTALL_HINT = (
@@ -122,6 +131,64 @@ def wait_for_cloudflare(page, content_selector: str = "", timeout: float = 45) -
     return False
 
 
+def is_rate_limited(page, response) -> bool:
+    """
+    True if the current page is a Cloudflare 1015 rate-limit block.
+
+    HTTP 429 is authoritative; we also sniff the body for the 1015 markers in
+    case the status is masked behind a custom error page.
+    """
+    try:
+        if response is not None and response.status == 429:
+            return True
+    except Exception:
+        pass
+    try:
+        body = (page.content() or "").lower()
+    except Exception:
+        return False
+    return any(m in body for m in RATE_LIMIT_MARKERS)
+
+
+def goto_and_clear(
+    page,
+    url: str,
+    content_selector: str = "",
+    timeout: float = 60000,
+    retries: int = 4,
+    backoff: float = 20.0,
+) -> bool:
+    """
+    Navigates to url, transparently handling both the Cloudflare challenge and
+    1015 rate-limiting. Returns True once real content is present, False if it
+    couldn't get through after `retries` attempts.
+
+    On a 1015 the page is reloaded after an exponential backoff (backoff,
+    2×, 4×, … plus jitter) — the only sane response to rate limiting is to slow
+    down and wait it out.
+    """
+    for attempt in range(retries + 1):
+        try:
+            response = page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        except Exception:
+            response = None
+
+        if is_rate_limited(page, response):
+            wait = backoff * (2 ** attempt) + random.uniform(0, backoff)
+            print(
+                f"  ⏳ Cloudflare 1015 rate limit — backing off {wait:.0f}s "
+                f"(attempt {attempt + 1}/{retries})"
+            )
+            time.sleep(wait)
+            continue
+
+        if wait_for_cloudflare(page, content_selector):
+            return True
+        # Cleared the challenge gate but content never showed — brief pause, retry.
+        time.sleep(backoff)
+    return False
+
+
 # ── Async variants (for parallel scraping) ────────────────────────────────────
 #
 # Parallelism is safe under Cloudflare because every page opened in the SAME
@@ -176,4 +243,50 @@ async def wait_for_cloudflare_async(page, content_selector: str = "", timeout: f
                 except Exception:
                     pass
         await asyncio.sleep(1.0)
+    return False
+
+
+async def is_rate_limited_async(page, response) -> bool:
+    """Async counterpart to is_rate_limited()."""
+    try:
+        if response is not None and response.status == 429:
+            return True
+    except Exception:
+        pass
+    try:
+        body = (await page.content() or "").lower()
+    except Exception:
+        return False
+    return any(m in body for m in RATE_LIMIT_MARKERS)
+
+
+async def goto_and_clear_async(
+    page,
+    url: str,
+    content_selector: str = "",
+    timeout: float = 60000,
+    retries: int = 4,
+    backoff: float = 20.0,
+) -> bool:
+    """Async counterpart to goto_and_clear() — challenge- and 1015-aware navigation."""
+    import asyncio
+
+    for attempt in range(retries + 1):
+        try:
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        except Exception:
+            response = None
+
+        if await is_rate_limited_async(page, response):
+            wait = backoff * (2 ** attempt) + random.uniform(0, backoff)
+            print(
+                f"  ⏳ Cloudflare 1015 rate limit on Ch — backing off {wait:.0f}s "
+                f"(attempt {attempt + 1}/{retries})"
+            )
+            await asyncio.sleep(wait)
+            continue
+
+        if await wait_for_cloudflare_async(page, content_selector):
+            return True
+        await asyncio.sleep(backoff)
     return False

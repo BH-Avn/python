@@ -38,8 +38,8 @@ from urllib.parse import urlparse
 from core.cloudflare import (
     cf_context,
     cf_context_async,
-    wait_for_cloudflare,
-    wait_for_cloudflare_async,
+    goto_and_clear,
+    goto_and_clear_async,
 )
 from core.epub_writer import txt_to_epub
 from core.scraper import Progress, extract_content_from_html, _order_chapters
@@ -118,8 +118,7 @@ def _collect_toc_urls(url: str, headless: bool = False) -> list:
     with cf_context(PROFILE_DIR, headless=headless) as ctx:
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
-        page.goto(book_root, wait_until="domcontentloaded", timeout=60000)
-        if not wait_for_cloudflare(page, "a[href*=chapter]"):
+        if not goto_and_clear(page, book_root, "a[href*=chapter]"):
             print("Cloudflare did not clear on the book page.")
             return []
 
@@ -140,8 +139,7 @@ def _collect_toc_urls(url: str, headless: bool = False) -> list:
 
         for pg in range(1, max_page + 1):
             if pg > 1:
-                page.goto(f"{book_root}/{pg}", wait_until="domcontentloaded", timeout=60000)
-                if not wait_for_cloudflare(page, "a[href*=chapter]"):
+                if not goto_and_clear(page, f"{book_root}/{pg}", "a[href*=chapter]"):
                     print(f"  page {pg}: Cloudflare did not clear — skipping")
                     continue
             try:
@@ -186,8 +184,7 @@ async def _scrape_one_async(sem, ctx, url: str, num: int, delay: float) -> tuple
         page = await ctx.new_page()
         text = ""
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            if await wait_for_cloudflare_async(page, CONTENT_SELECTOR):
+            if await goto_and_clear_async(page, url, CONTENT_SELECTOR):
                 text = await _extract_text_async(page)
         except Exception as e:
             print(f"  ERR Ch {num}: {e}")
@@ -219,8 +216,7 @@ async def _run_parallel(urls, output_file, progress_file, start_num, delay, work
         # hit the challenge at the same time (which looks like a bot attack).
         warm = await ctx.new_page()
         try:
-            await warm.goto(pending[0][1], wait_until="domcontentloaded", timeout=60000)
-            if not await wait_for_cloudflare_async(warm, CONTENT_SELECTOR):
+            if not await goto_and_clear_async(warm, pending[0][1], CONTENT_SELECTOR):
                 print("Cloudflare did not clear during warm-up — aborting.")
                 return
         finally:
@@ -305,8 +301,7 @@ def scrape(
 
         if advance_first:
             print("Finding resume point from last completed chapter...")
-            page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
-            if not wait_for_cloudflare(page, CONTENT_SELECTOR):
+            if not goto_and_clear(page, current_url, CONTENT_SELECTOR):
                 print("Cloudflare did not clear on the resume page — aborting.")
                 return
             nxt = _next_url(page, current_url)
@@ -319,15 +314,8 @@ def scrape(
         with open(output_file, file_mode, encoding="utf-8") as f:
             while chapter_num <= max_chapters:
                 print(f"Ch {chapter_num} → {current_url}")
-                try:
-                    page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
-                except Exception as e:
-                    print(f"  ERR goto: {e}")
-                    progress.mark_failed(chapter_num)
-                    break
-
-                if not wait_for_cloudflare(page, CONTENT_SELECTOR):
-                    print("  ✗ Cloudflare did not clear — stopping.")
+                if not goto_and_clear(page, current_url, CONTENT_SELECTOR):
+                    print("  ✗ Cloudflare/rate-limit did not clear — stopping.")
                     progress.mark_failed(chapter_num)
                     break
 
