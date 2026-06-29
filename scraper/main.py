@@ -46,6 +46,7 @@ BANNER = """
 ║  [3]  9kafe      — download EPUBs        ║
 ║  [4]  Convert    — .txt → .epub          ║
 ║  [5]  Generic    — any website           ║
+║  [6]  NovelLive  — Cloudflare-protected  ║
 ║  [0]  Exit                               ║
 ╚══════════════════════════════════════════╝
 """
@@ -55,6 +56,7 @@ ROUTES = {
     "2": ("sites.novelarrow", "Novelarrow"),
     "3": ("sites.kafe9",      "9kafe"),
     "5": ("sites.generic",    "Generic"),
+    "6": ("sites.novellive",  "NovelLive"),
 }
 
 
@@ -170,6 +172,28 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--delay",   type=float, default=0.5)
     g.add_argument("--epub",    action="store_true")
 
+    # ── novellive ─────────────────────────────────────────────────────────────
+    nl = subparsers.add_parser(
+        "novellive", help="Scrape novellive.app (Cloudflare-protected, patchright)"
+    )
+    nl.add_argument("--url",      required=True,
+                    help="next mode: a chapter URL to start from; toc mode: the book URL")
+    nl.add_argument("--name",     required=True, help="Novel name (folder + file)")
+    nl.add_argument("--mode",     choices=["next", "toc"], default="next",
+                    help="next = follow next-chapter links (sequential); "
+                         "toc = harvest book page then scrape in parallel")
+    nl.add_argument("--range",    dest="chapter_range", metavar="START-END",
+                    help="toc mode only — chapter range, e.g. 1-200")
+    nl.add_argument("--workers",  type=int, default=3,
+                    help="toc mode only — parallel workers (default 3; keep ≤5)")
+    nl.add_argument("--delay",    type=float, default=0.5,
+                    help="Delay between chapters per worker (default 0.5)")
+    nl.add_argument("--max",      dest="max_chapters", type=int, default=5000,
+                    help="next mode only — stop after this many chapters (default 5000)")
+    nl.add_argument("--epub",     action="store_true", help="Convert to EPUB after scraping")
+    nl.add_argument("--headless", action="store_true",
+                    help="Run the browser headless (less reliable against Cloudflare)")
+
     # ── convert ───────────────────────────────────────────────────────────────
     c = subparsers.add_parser("convert", help="Batch convert .txt files to .epub")
     c.add_argument("--dir", default="", metavar="DIR",
@@ -190,13 +214,19 @@ def _dict_to_namespace(d: dict) -> argparse.Namespace:
     """Converts a batch JSON entry dict to an argparse-compatible Namespace."""
     ns = argparse.Namespace()
     for k, v in d.items():
-        # Map JSON key 'range' → 'chapter_range' to match argparse dest
-        key = "chapter_range" if k == "range" else k.replace("-", "_")
+        # Map JSON keys to argparse dests: 'range' → 'chapter_range', 'max' → 'max_chapters'
+        if k == "range":
+            key = "chapter_range"
+        elif k == "max":
+            key = "max_chapters"
+        else:
+            key = k.replace("-", "_")
         setattr(ns, key, v)
     # Fill in defaults for optional fields
     for attr, default in [
         ("workers", 3), ("delay", 0.5), ("epub", False),
         ("chapter_range", None), ("mode", "toc"), ("output_dir", None),
+        ("max_chapters", 5000), ("headless", False),
     ]:
         if not hasattr(ns, attr):
             setattr(ns, attr, default)
@@ -216,6 +246,7 @@ def _dispatch_cli(args):
         "novelarrow": "sites.novelarrow",
         "kafe9":      "sites.kafe9",
         "generic":    "sites.generic",
+        "novellive":  "sites.novellive",
     }
 
     if site not in site_map:
@@ -295,7 +326,7 @@ def _run_interactive():
             print(BANNER)
 
         else:
-            print("Invalid option. Please enter 0 – 5.\n")
+            print("Invalid option. Please enter 0 – 6.\n")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
