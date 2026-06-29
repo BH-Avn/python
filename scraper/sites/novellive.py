@@ -35,6 +35,7 @@ import re
 import time
 from urllib.parse import urlparse
 
+from core.cache import NovelCache
 from core.cloudflare import (
     cf_context,
     cf_context_async,
@@ -46,6 +47,8 @@ from core.scraper import Progress, extract_content_from_html, _order_chapters
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_BASE = os.path.join(BASE_DIR, "output")
+# Shared chapter-list cache (same file as Novelbin/Novelarrow).
+CACHE_PATH = os.path.join(BASE_DIR, "novel_cache.json")
 # Persistent browser profile — keeps the cf_clearance cookie between runs.
 PROFILE_DIR = os.path.join(BASE_DIR, ".cf_profile")
 
@@ -157,6 +160,37 @@ def _collect_toc_urls(url: str, headless: bool = False) -> list:
             print(f"  page {pg}/{max_page}: +{added} ({len(urls)} total)")
 
     return _order_chapters(urls)
+
+
+def _get_toc_urls(url: str, headless: bool = False, refresh: bool = False) -> list:
+    """
+    Returns the chapter-URL list for a book, using novel_cache.json when present.
+
+    Harvesting the TOC means walking ~27 paginated pages through Cloudflare, which
+    is slow and adds rate-limit (1015) risk — so we cache the result keyed by the
+    book root URL and reuse it on later runs. `refresh=True` re-harvests (picking
+    up newly published chapters) and overwrites the cache entry.
+    """
+    book_root = _book_root(url)
+    cache = NovelCache(CACHE_PATH)
+    data = cache.load()
+    cached = data.get(book_root)
+
+    if cached and not refresh:
+        print(f"Using {len(cached)} cached chapter URLs (pass --refresh to re-fetch).")
+        return cached
+
+    urls = _collect_toc_urls(url, headless=headless)
+    if urls:
+        data[book_root] = urls
+        cache.save(data)
+        print(f"Cached {len(urls)} chapter URLs → novel_cache.json")
+        return urls
+
+    # Harvest failed (e.g. Cloudflare) — fall back to any cached list we had.
+    if cached:
+        print("Harvest failed — falling back to cached URLs.")
+    return cached or []
 
 
 # ── Parallel scraping (TOC mode) ──────────────────────────────────────────────
@@ -390,8 +424,13 @@ def run():
         print(f"\nMode: follow next-chapter links | Output: {output_txt}\n")
         scrape(url, output_txt, progress_file, delay=delay)
     else:
-        print("\nFetching chapter list from the book page...")
-        urls = _collect_toc_urls(url)
+        refresh = False
+        if NovelCache(CACHE_PATH).load().get(_book_root(url)):
+            refresh = input(
+                "Cached chapter list found. Re-fetch from site? (y/N): "
+            ).strip().lower() == "y"
+        print()
+        urls = _get_toc_urls(url, refresh=refresh)
         if not urls:
             print("No chapters found. Use mode [1] (follow next links) instead.")
             return
@@ -436,8 +475,9 @@ def run_cli(args):
     headless = getattr(args, "headless", False)
 
     if mode == "toc":
-        print("Fetching chapter list from the book page...")
-        urls = _collect_toc_urls(args.url, headless=headless)
+        urls = _get_toc_urls(
+            args.url, headless=headless, refresh=getattr(args, "refresh", False)
+        )
         if not urls:
             print("No chapters found. Try --mode next instead.")
             return

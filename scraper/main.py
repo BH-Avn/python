@@ -184,6 +184,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          "toc = harvest book page then scrape in parallel")
     nl.add_argument("--range",    dest="chapter_range", metavar="START-END",
                     help="toc mode only — chapter range, e.g. 1-200")
+    nl.add_argument("--refresh",  action="store_true",
+                    help="toc mode only — re-harvest the chapter list instead of using the cache")
     nl.add_argument("--workers",  type=int, default=3,
                     help="toc mode only — parallel workers (default 3; keep ≤5)")
     nl.add_argument("--delay",    type=float, default=0.5,
@@ -226,7 +228,7 @@ def _dict_to_namespace(d: dict) -> argparse.Namespace:
     for attr, default in [
         ("workers", 3), ("delay", 0.5), ("epub", False),
         ("chapter_range", None), ("mode", "toc"), ("output_dir", None),
-        ("max_chapters", 5000), ("headless", False),
+        ("max_chapters", 5000), ("headless", False), ("refresh", False),
     ]:
         if not hasattr(ns, attr):
             setattr(ns, attr, default)
