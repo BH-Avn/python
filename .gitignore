@@ -8,6 +8,8 @@ scraper/novel_cache.json
 scraper/output/
 scraper/downloaded_epubs/
 scraper/_backups/
+# Persistent browser profile for Cloudflare bypass (holds cf_clearance cookie)
+scraper/.cf_profile/
 
 # Anki input file — user-managed, cleared after each run
 anki-generation/cards.txt
