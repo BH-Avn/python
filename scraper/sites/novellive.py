@@ -106,17 +106,95 @@ def _book_root(url: str) -> str:
     return m.group(1) if m else url.rstrip("/")
 
 
+def _book_slug(url: str) -> str:
+    """Returns the novel slug from a /book/<slug>/... URL."""
+    m = re.search(r"/book/([^/?#]+)", url)
+    return m.group(1) if m else ""
+
+
+def _fetch_list_via_ajax(ctx, base: str, book_root: str, slug: str) -> list:
+    """
+    Returns all chapter URLs from novellive's chapter-list endpoint in ONE
+    request — the same call the in-page chapter dropdown makes:
+        /ajax/get-list-chapter?novel_id=<slug>&chapter_id=
+    Response is JSON: {"success": true, "chapters": [{"chapter_id": ...}, ...]}.
+    The chapter_id parameter doesn't affect the result, so we leave it blank.
+    Called through the cf_clearance-bearing context, so it isn't re-challenged.
+    """
+    if not slug:
+        return []
+    endpoint = f"{base}/ajax/get-list-chapter?novel_id={slug}&chapter_id="
+    try:
+        resp = ctx.request.get(endpoint, timeout=30000)
+        if not resp.ok:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    if not data.get("success"):
+        return []
+    return [
+        f"{book_root}/{c['chapter_id']}"
+        for c in data.get("chapters", [])
+        if c.get("chapter_id")
+    ]
+
+
+def _collect_toc_via_pagination(page, book_root: str) -> list:
+    """
+    Fallback harvester: walks the paginated chapter list at /book/<slug>/<page>
+    and collects chapter hrefs. Slower (one request per page) and only used if
+    the chapter-list endpoint changes. `page` must already be on book_root.
+    """
+    seen, urls = set(), []
+    try:
+        hrefs = page.eval_on_selector_all(
+            "a[href]", "els => els.map(e => e.getAttribute('href'))"
+        )
+    except Exception:
+        hrefs = []
+    pages = [
+        int(m.group(1))
+        for h in hrefs
+        if (m := re.search(r"/book/[^/]+/(\d+)$", h or ""))
+    ]
+    max_page = max(pages) if pages else 1
+    print(f"Chapter list spans {max_page} page(s).")
+
+    for pg in range(1, max_page + 1):
+        if pg > 1:
+            if not goto_and_clear(page, f"{book_root}/{pg}", "a[href*=chapter]"):
+                print(f"  page {pg}: Cloudflare did not clear — skipping")
+                continue
+        try:
+            chapter_hrefs = page.eval_on_selector_all(
+                "a[href*=chapter]", "els => els.map(e => e.href)"
+            )
+        except Exception:
+            chapter_hrefs = []
+        added = 0
+        for h in chapter_hrefs:
+            if h and re.search(r"/chapter-\d+", h) and h not in seen:
+                seen.add(h)
+                urls.append(h)
+                added += 1
+        print(f"  page {pg}/{max_page}: +{added} ({len(urls)} total)")
+
+    return urls
+
+
 def _collect_toc_urls(url: str, headless: bool = False) -> list:
     """
     Returns every chapter URL for a book, oldest-first.
 
-    novellive paginates its chapter list at /book/<slug>/<page>. We read the
-    highest page number from the pagination links, walk every page collecting
-    chapter hrefs, then order them by chapter number. The cf_clearance cookie is
-    shared across pages, so only the first page pays the Cloudflare cost.
+    Primary path: a single call to novellive's chapter-list endpoint returns the
+    whole list at once (what the in-page chapter dropdown uses). Fallback: walk
+    the paginated chapter list, in case that endpoint ever changes.
     """
     book_root = _book_root(url)
-    seen, urls = set(), []
+    parsed = urlparse(book_root)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    slug = _book_slug(book_root)
 
     with cf_context(PROFILE_DIR, headless=headless) as ctx:
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -125,41 +203,13 @@ def _collect_toc_urls(url: str, headless: bool = False) -> list:
             print("Cloudflare did not clear on the book page.")
             return []
 
-        # Highest page number among /book/<slug>/<n> pagination links.
-        try:
-            hrefs = page.eval_on_selector_all(
-                "a[href]", "els => els.map(e => e.getAttribute('href'))"
-            )
-        except Exception:
-            hrefs = []
-        pages = [
-            int(m.group(1))
-            for h in hrefs
-            if (m := re.search(r"/book/[^/]+/(\d+)$", h or ""))
-        ]
-        max_page = max(pages) if pages else 1
-        print(f"Chapter list spans {max_page} page(s).")
+        urls = _fetch_list_via_ajax(ctx, base, book_root, slug)
+        if urls:
+            print(f"Got {len(urls)} chapters from the chapter-list endpoint.")
+            return _order_chapters(urls)
 
-        for pg in range(1, max_page + 1):
-            if pg > 1:
-                if not goto_and_clear(page, f"{book_root}/{pg}", "a[href*=chapter]"):
-                    print(f"  page {pg}: Cloudflare did not clear — skipping")
-                    continue
-            try:
-                chapter_hrefs = page.eval_on_selector_all(
-                    "a[href*=chapter]", "els => els.map(e => e.href)"
-                )
-            except Exception:
-                chapter_hrefs = []
-            added = 0
-            for h in chapter_hrefs:
-                if h and re.search(r"/chapter-\d+", h) and h not in seen:
-                    seen.add(h)
-                    urls.append(h)
-                    added += 1
-            print(f"  page {pg}/{max_page}: +{added} ({len(urls)} total)")
-
-    return _order_chapters(urls)
+        print("Endpoint returned nothing — falling back to paginated harvest...")
+        return _order_chapters(_collect_toc_via_pagination(page, book_root))
 
 
 def _get_toc_urls(url: str, headless: bool = False, refresh: bool = False) -> list:
