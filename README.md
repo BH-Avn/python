@@ -108,6 +108,53 @@ Back: HyperText Transfer Protocol
 
 ---
 
+### PDF → Markdown Converter — `pdf to markdown/`
+
+Converts any text-based PDF into a clean, structured Markdown file using [`pymupdf4llm`](https://pypi.org/project/pymupdf4llm/) for layout-aware extraction, followed by a post-processing pass that:
+
+- Strips running headers/footers by **frequency** (a short line repeating across most pages is chrome, not content) — more reliable than fixed regex
+- Removes standalone page numbers (digits and roman numerals)
+- Rejoins sentences/paragraphs split by page breaks, while preserving real paragraph breaks, lists, and headings (also de-hyphenates split words)
+- Normalizes book headings — `## ` for Parts, `### ` for Chapters (handles both `Chapter N …` and bare numbered `N. Title` forms)
+
+Works on any PDF, not a single book. Scanned/image-only PDFs (no text layer) are skipped with a notice — OCR them first (e.g. `ocrmypdf`).
+
+**Install dependencies:**
+```bash
+pip install pymupdf4llm
+```
+
+**Folder workflow** — drop PDFs in `imports/`, run with no arguments:
+```bash
+cd "pdf to markdown"
+python pdf_to_markdown.py
+```
+- 1 PDF → converts automatically
+- 2+ PDFs → numbered menu to pick one, a comma-list (`1,3`), or `a` for all
+
+`.md` output is written to `exports/`; the original is moved to `completed/` **only after a successful conversion**. Name collisions are versioned (`book.md`, `book_1.md`, …) — nothing is ever overwritten.
+
+**Non-interactive / one-off:**
+```bash
+python pdf_to_markdown.py --all            # convert every PDF in imports/
+python pdf_to_markdown.py --name book.pdf  # convert just that one
+python pdf_to_markdown.py some/file.pdf -o out.md   # explicit, ignores the folders
+```
+
+**Structure:**
+```
+pdf to markdown/
+  pdf_to_markdown.py   converter — folder workflow + explicit mode
+  make_test_pdf.py     generates a synthetic PDF for testing
+  imports/             drop your PDF(s) here
+  exports/             .md output
+  completed/           originals, moved here after conversion
+```
+
+> The interactive menu needs a real terminal (uses `input()`). For automated runs use `--all` or `--name`.
+
+---
+
 ## Requirements
 
 - Python 3.10+

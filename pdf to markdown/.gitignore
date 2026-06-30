@@ -1,0 +1,10 @@
+# User working files — never commit PDFs or generated markdown.
+# (Often copyrighted source material and large binaries.)
+imports/*
+exports/*
+completed/*
+
+# Keep the folder structure in the repo.
+!imports/.gitkeep
+!exports/.gitkeep
+!completed/.gitkeep
