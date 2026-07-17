@@ -34,6 +34,13 @@ import os
 import sys
 import types
 
+# Site modules print unicode symbols (✓, →, …). On Windows the console
+# defaults to a legacy codepage (e.g. cp1252) that can't encode them,
+# which crashes mid-scrape. Force UTF-8 stdout/stderr up front.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
