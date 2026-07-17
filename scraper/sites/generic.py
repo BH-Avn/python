@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 from core.browser import make_context
+from core.cf_bypass import scrape_follow_links_cf, scrape_url_list_cf, scrape_url_list_cf_parallel
 from core.epub_writer import txt_to_epub
 from core.scraper import (
     auto_detect_chapter_urls,
@@ -94,6 +95,10 @@ def run():
         print("Novel name cannot be empty.")
         return
 
+    cf_bypass = input(
+        "Site protected by Cloudflare (shows 'Just a moment...')? (y/n, press Enter for n): "
+    ).strip().lower() == "y"
+
     novel_dir = os.path.join(OUTPUT_BASE, novel_name)
     os.makedirs(novel_dir, exist_ok=True)
     output_txt = os.path.join(novel_dir, f"{novel_name}.txt")
@@ -106,7 +111,10 @@ def run():
 
         print(f"\nMode: follow next-chapter links")
         print(f"Output: {output_txt}\n")
-        scrape_follow_links(url, output_txt, progress_file, delay=delay)
+        if cf_bypass:
+            scrape_follow_links_cf(url, output_txt, progress_file, delay=delay)
+        else:
+            scrape_follow_links(url, output_txt, progress_file, delay=delay)
 
     # ── Mode 2: table of contents (parallel available) ────────────────────────
     else:
@@ -133,31 +141,49 @@ def run():
             print("No URLs in selected range.")
             return
 
-        workers_raw = input(
-            "Parallel workers (1 = sequential, 3 = fast, 5 = fastest): "
-        ).strip()
-        try:
-            workers = max(1, int(workers_raw)) if workers_raw else 3
-        except ValueError:
-            workers = 3
+        if cf_bypass:
+            workers_raw = input(
+                "Parallel browser windows (1 = sequential, 3-5 = faster but heavier): "
+            ).strip()
+            try:
+                workers = max(1, int(workers_raw)) if workers_raw else 1
+            except ValueError:
+                workers = 1
 
-        delay_raw = input(
-            f"Delay per worker in seconds (press Enter for {'0.5' if workers > 1 else '2.0'}): "
-        ).strip()
-        delay = float(delay_raw) if delay_raw else (0.5 if workers > 1 else 2.0)
+            delay_raw = input("Delay between chapters in seconds (press Enter for 2.0): ").strip()
+            delay = float(delay_raw) if delay_raw else 2.0
 
-        print(f"\nScraping {len(urls)} chapters with {workers} worker(s) → {output_txt}\n")
-
-        if workers > 1:
-            scrape_url_list_async(
-                urls, output_txt, progress_file,
-                start_num=start, delay=delay, workers=workers,
-            )
+            print(f"\nScraping {len(urls)} chapters (Cloudflare bypass, {workers} worker(s)) → {output_txt}\n")
+            if workers > 1:
+                scrape_url_list_cf_parallel(urls, output_txt, progress_file, start_num=start, delay=delay, workers=workers)
+            else:
+                scrape_url_list_cf(urls, output_txt, progress_file, start_num=start, delay=delay)
         else:
-            scrape_url_list(
-                urls, output_txt, progress_file,
-                start_num=start, delay=delay,
-            )
+            workers_raw = input(
+                "Parallel workers (1 = sequential, 3 = fast, 5 = fastest): "
+            ).strip()
+            try:
+                workers = max(1, int(workers_raw)) if workers_raw else 3
+            except ValueError:
+                workers = 3
+
+            delay_raw = input(
+                f"Delay per worker in seconds (press Enter for {'0.5' if workers > 1 else '2.0'}): "
+            ).strip()
+            delay = float(delay_raw) if delay_raw else (0.5 if workers > 1 else 2.0)
+
+            print(f"\nScraping {len(urls)} chapters with {workers} worker(s) → {output_txt}\n")
+
+            if workers > 1:
+                scrape_url_list_async(
+                    urls, output_txt, progress_file,
+                    start_num=start, delay=delay, workers=workers,
+                )
+            else:
+                scrape_url_list(
+                    urls, output_txt, progress_file,
+                    start_num=start, delay=delay,
+                )
 
     if os.path.exists(output_txt):
         if input("\nConvert to EPUB? (y/n): ").strip().lower() == "y":
@@ -180,10 +206,14 @@ def run_cli(args):
     workers = getattr(args, "workers", 3)
     delay = getattr(args, "delay", 0.5 if workers > 1 else 2.0)
     epub = getattr(args, "epub", False)
+    cf_bypass = getattr(args, "cf_bypass", False)
 
     if mode == "next":
         print(f"Mode: follow next-chapter links | Output: {output_txt}\n")
-        scrape_follow_links(url, output_txt, progress_file, delay=delay)
+        if cf_bypass:
+            scrape_follow_links_cf(url, output_txt, progress_file, delay=delay)
+        else:
+            scrape_follow_links(url, output_txt, progress_file, delay=delay)
 
     else:
         print("Fetching chapter list from TOC page...")
@@ -202,18 +232,24 @@ def run_cli(args):
             print("No URLs in selected range.")
             return
 
-        print(f"Scraping {len(urls)} chapters with {workers} worker(s)...\n")
-
-        if workers > 1:
-            scrape_url_list_async(
-                urls, output_txt, progress_file,
-                start_num=start, delay=delay, workers=workers,
-            )
+        if cf_bypass:
+            print(f"Scraping {len(urls)} chapters (Cloudflare bypass, {workers} worker(s))...\n")
+            if workers > 1:
+                scrape_url_list_cf_parallel(urls, output_txt, progress_file, start_num=start, delay=delay, workers=workers)
+            else:
+                scrape_url_list_cf(urls, output_txt, progress_file, start_num=start, delay=delay)
         else:
-            scrape_url_list(
-                urls, output_txt, progress_file,
-                start_num=start, delay=delay,
-            )
+            print(f"Scraping {len(urls)} chapters with {workers} worker(s)...\n")
+            if workers > 1:
+                scrape_url_list_async(
+                    urls, output_txt, progress_file,
+                    start_num=start, delay=delay, workers=workers,
+                )
+            else:
+                scrape_url_list(
+                    urls, output_txt, progress_file,
+                    start_num=start, delay=delay,
+                )
 
     if epub and os.path.exists(output_txt):
         txt_to_epub(output_txt, os.path.join(novel_dir, f"{novel_name}.epub"))

@@ -176,6 +176,9 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Parallel workers (TOC mode only; ignored for next-links mode)")
     g.add_argument("--delay",   type=float, default=0.5)
     g.add_argument("--epub",    action="store_true")
+    g.add_argument("--cf-bypass", dest="cf_bypass", action="store_true",
+                    help="Site is Cloudflare-protected — scrape via a real, anti-detection "
+                         "browser session instead of Playwright (slower, sequential only)")
 
     # ── convert ───────────────────────────────────────────────────────────────
     c = subparsers.add_parser("convert", help="Batch convert .txt files to .epub")
@@ -204,6 +207,7 @@ def _dict_to_namespace(d: dict) -> argparse.Namespace:
     for attr, default in [
         ("workers", 3), ("delay", 0.5), ("epub", False),
         ("chapter_range", None), ("mode", "toc"), ("output_dir", None),
+        ("cf_bypass", False),
     ]:
         if not hasattr(ns, attr):
             setattr(ns, attr, default)
