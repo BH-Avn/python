@@ -11,3 +11,16 @@ scraper/_backups/
 
 # Anki input file — user-managed, cleared after each run
 anki-generation/cards.txt
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Cloudflare clearance cookie — a live session token bound to this
+# machine's IP + User-Agent. Never commit.
+scraper/cf_cookie.json
+
+# Third-party tooling cloned in at setup time (carries its own git
+# history; would otherwise land as a broken submodule). See the README.
+scraper/tools/
