@@ -9,6 +9,8 @@ CLI mode (non-interactive, scriptable):
     python main.py novelarrow --url URL --name NAME [--range 1-100] [--workers 3] [--epub]
                                                     [--output-dir PATH]
     python main.py kafe9      --url URL --name NAME
+    python main.py empire     --url URL --name NAME [--range 2337-] [--delay 2.0]
+                                                    [--epub]
     python main.py generic    --url URL --name NAME --mode toc|next
                                                     [--range 1-100] [--workers 3]
                                                     [--delay 0.5]   [--epub]
@@ -46,6 +48,7 @@ BANNER = """
 ║  [3]  9kafe      — download EPUBs        ║
 ║  [4]  Convert    — .txt → .epub          ║
 ║  [5]  Generic    — any website           ║
+║  [6]  Empire     — Cloudflare-protected  ║
 ║  [0]  Exit                               ║
 ╚══════════════════════════════════════════╝
 """
@@ -55,6 +58,7 @@ ROUTES = {
     "2": ("sites.novelarrow", "Novelarrow"),
     "3": ("sites.kafe9",      "9kafe"),
     "5": ("sites.generic",    "Generic"),
+    "6": ("sites.empirenovel", "Empire Novel"),
 }
 
 
@@ -170,6 +174,16 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--delay",   type=float, default=0.5)
     g.add_argument("--epub",    action="store_true")
 
+    # ── empire ──────────────────────────────────────────────────────────
+    e = subparsers.add_parser("empire", help="Scrape empirenovel.com (Cloudflare)")
+    e.add_argument("--url",   required=True,
+                   help="Novel URL or bare slug, e.g. lord-of-the-truth")
+    e.add_argument("--name",  required=True, help="Novel name (folder + file)")
+    e.add_argument("--range", dest="chapter_range", metavar="START-END",
+                   help="Chapter range; open ended allowed, e.g. 2337-")
+    e.add_argument("--delay", type=float, default=2.0)
+    e.add_argument("--epub",  action="store_true")
+
     # ── convert ───────────────────────────────────────────────────────────────
     c = subparsers.add_parser("convert", help="Batch convert .txt files to .epub")
     c.add_argument("--dir", default="", metavar="DIR",
@@ -216,6 +230,7 @@ def _dispatch_cli(args):
         "novelarrow": "sites.novelarrow",
         "kafe9":      "sites.kafe9",
         "generic":    "sites.generic",
+        "empire":     "sites.empirenovel",
     }
 
     if site not in site_map:
@@ -295,7 +310,7 @@ def _run_interactive():
             print(BANNER)
 
         else:
-            print("Invalid option. Please enter 0 – 5.\n")
+            print("Invalid option. Please enter 0 – 6.\n")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
