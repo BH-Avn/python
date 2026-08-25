@@ -14,3 +14,16 @@ anki-generation/cards.txt
 
 # IDE
 .claude/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Cloudflare clearance cookie — a live session token bound to this
+# machine's IP + User-Agent. Never commit.
+scraper/cf_cookie.json
+
+# Third-party tooling cloned in at setup time (carries its own git
+# history; would otherwise land as a broken submodule). See the README.
+scraper/tools/
